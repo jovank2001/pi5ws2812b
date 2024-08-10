@@ -3,7 +3,8 @@ main.c
 2024-08-09
 
 Testing the lgpio library for commanding ws2812b LEDs
-gcc -Wall -o main main.c -llgpio
+Sets LED1 to Green 
+gcc -Wall -o main main.c -lrgpio
 
 ./main
 */
@@ -12,6 +13,7 @@ gcc -Wall -o main main.c -llgpio
 #include <stdlib.h>
 
 #include <../include/lg/lgpio.h>
+#include <../include/lg/rgpio.h>
 
 #define LFLAGS 0
 #define GPIOPIN 21
@@ -33,7 +35,15 @@ int main(int argc, char *argv[])
    int i;
    double start, end;
 
-   h = lgGpiochipOpen(GPIOCHIP);
+   sbc = rgpiod_start(NULL, NULL);
+
+   if (sbc < 0)
+   {
+      printf("connection failed\n");
+      exit(-1);
+   }
+
+   h = gpiochip_open(sbc, GPIOCHIP);
 
    if (h >= 0)
    {
@@ -51,6 +61,8 @@ int main(int argc, char *argv[])
          So: 0b111111110000000000000000
         */
 
+       for (int i = 0; i < LOOPS; i++)
+       {
         start = lguTime();
         lguSleep(TRESET * .0000001); //Reset Command
         lgTxPulse(h, GPIOPIN, T1H, T1L, 0, 8); //Send 8 ones
@@ -58,7 +70,10 @@ int main(int argc, char *argv[])
         end = lguTime();
         printf("Took %.1f seconds to send a Reset cmd followed by a green pulse to LED1 then 0\n", LOOPS, end-start);
       }
-      lgGpiochipClose(h);
-   }
-}
 
+      }
+      gpiochip_close(sbc, h);
+   }
+
+   rgpiod_stop(sbc);
+}
