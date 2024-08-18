@@ -307,20 +307,31 @@ int main(void)
     uint32_t BLUE = 0b100100100100100100100100;
     spi_status_t res;
 
-    for (int i = 0; i < 2000; i++)
+    for (int i = 0; i < 1; i++)
     {
         res |= rp1_spi_write_8_blocking(spi, GREEN);
         res |= rp1_spi_write_8_blocking(spi, GREEN);
+
         res |= rp1_spi_write_8_blocking(spi, RED);
         res |= rp1_spi_write_8_blocking(spi, RED);
+
         res |= rp1_spi_write_8_blocking(spi, BLUE);
         res |= rp1_spi_write_8_blocking(spi, BLUE);
+
         //Delay ~50usec
-        for (int j = 0; j < 1000000; j++)
+        for (int j = 0; j < 100000000; j++)
         {
             foo = 2;
         };
-        
+        GREEN = 0b100100100100100100100100;
+        res |= rp1_spi_write_8_blocking(spi, GREEN);
+        res |= rp1_spi_write_8_blocking(spi, GREEN);
+
+        res |= rp1_spi_write_8_blocking(spi, RED);
+        res |= rp1_spi_write_8_blocking(spi, RED);
+
+        res |= rp1_spi_write_8_blocking(spi, BLUE);
+        res |= rp1_spi_write_8_blocking(spi, BLUE);
     }
 
     printf("command sent\n");
@@ -330,7 +341,7 @@ int main(void)
     
     /*
     // sometimes (particularly at low baud rates), data appears in the
-    // RF fifo, even if it was empty after the last write we made
+    // RX fifo, even if it was empty after the last write we made
     // (see the code for rp1_spi_write_8_blocking() for more info)
     // my workaround for this is to do a check and just clear the
     // rx fifo again - it returns the number of dwords purged
