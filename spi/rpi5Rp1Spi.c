@@ -39,6 +39,19 @@ void delay_ms(int milliseconds)
     nanosleep(&ts, NULL);
 }
 
+void delay_ns(double ns) {
+    //Higher precision
+    struct timespec start, current;
+    long elapsed_ns;
+
+    clock_gettime(CLOCK_MONOTONIC, &start);
+
+    do {
+        clock_gettime(CLOCK_MONOTONIC, &current);
+        elapsed_ns = (current.tv_sec - start.tv_sec) * 1000000000L + (current.tv_nsec - start.tv_nsec);
+    } while (elapsed_ns < ns);
+}
+
 // pci bar info
 // from: https://github.com/G33KatWork/RP1-Reverse-Engineering/blob/master/pcie/hacks.py
 #define RP1_BAR1 0x1f00000000
@@ -255,7 +268,7 @@ int main(void)
     // read control
     uint32_t reg_ctrlr0 = *(volatile uint32_t *)(spi->regbase + DW_SPI_CTRLR0);
     printf("ctrlr0 before setting: %x\n", reg_ctrlr0);
-    reg_ctrlr0 |= DW_PSSI_CTRLR0_SCPHA;
+    reg_ctrlr0 |= DW_PSSI_CTRLR0_SCPOL;
     // update the control reg
     *(volatile uint32_t *)(spi->regbase + DW_SPI_CTRLR0) = reg_ctrlr0;
     reg_ctrlr0 = *(volatile uint32_t *)(spi->regbase + DW_SPI_CTRLR0);
@@ -294,17 +307,20 @@ int main(void)
     uint32_t BLUE = 0b100100100100100100100100;
     spi_status_t res;
 
-    for (int i = 0; i < 1; i++)
+    for (int i = 0; i < 2000; i++)
     {
         res |= rp1_spi_write_8_blocking(spi, GREEN);
+        res |= rp1_spi_write_8_blocking(spi, GREEN);
+        res |= rp1_spi_write_8_blocking(spi, RED);
         res |= rp1_spi_write_8_blocking(spi, RED);
         res |= rp1_spi_write_8_blocking(spi, BLUE);
+        res |= rp1_spi_write_8_blocking(spi, BLUE);
         //Delay ~50usec
-        for (int j = 0; j < 1000; j++)
+        for (int j = 0; j < 1000000; j++)
         {
-            //Do X
             foo = 2;
-        }
+        };
+        
     }
 
     printf("command sent\n");
