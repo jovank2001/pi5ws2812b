@@ -1,79 +1,272 @@
 /*
-main.c
-2024-08-09
+    GPIO access on RP1 through PCI BAR1
+    2024 Feb
+    Praktronics
+    GPL3
+    
 
-Testing the lgpio library for commanding ws2812b LEDs
-Sets LED1 to Green 
-gcc -Wall -o main main.c -lrgpio
+    run with sudo or as root for permissions to access to /dev/mem
+    this file is self-contained and should compile with gcc -o rpi5-rp1-gpio rpi5-rp1-gpio.c
 
-./main
+    ~/rpi5-rp1-gpio $ gcc -o rpi5-rp1-gpio rpi5-rp1-gpio.c
+    ~/rpi5-rp1-gpio $ sudo ./rpi5-rp1-gpio 
+
 */
 
+
+#include <stdint.h>
 #include <stdio.h>
+#include <stdbool.h>
 #include <stdlib.h>
+#include <sys/mman.h>
+#include <fcntl.h>
+#include <time.h>
 
-#include <../include/lg/lgpio.h>
-#include <../include/lg/rgpio.h>
-
-#define LFLAGS 0
-#define GPIOPIN 21
-#define GPIOCHIP 2 // For dev/gpiochip2 on RPI5
-/*
-Timing in microseconds for ws2812b LED pulses
-From WS2812B.pdf
-*/
-#define T0H .45 
-#define T0L .85 
-#define T1H .8 
-#define T1L .4 
-#define TRESET 50
-
-
-int main(int argc, char *argv[])
+void delay_us(int microseconds)
 {
-   int h;
-   int i;
-   double start, end;
+    struct timespec ts;
+    ts.tv_sec = 0;
+    ts.tv_nsec = microseconds * 1000L;
+    printf("Delay: %ld\n", ts.tv_nsec);
+    nanosleep(&ts, NULL);
+}
 
-   sbc = rgpiod_start(NULL, NULL);
+// pci bar info
+// from: https://github.com/G33KatWork/RP1-Reverse-Engineering/blob/master/pcie/hacks.py
+#define RP1_BAR1 0x1f00000000
+#define RP1_BAR1_LEN 0x400000
 
-   if (sbc < 0)
-   {
-      printf("connection failed\n");
-      exit(-1);
-   }
+// offsets from include/dt-bindings/mfd/rp1.h
+// https://github.com/raspberrypi/linux/blob/rpi-6.1.y/include/dt-bindings/mfd/rp1.h
+#define RP1_IO_BANK0_BASE 0x0d0000
+#define RP1_RIO0_BASE 0x0e0000
+#define RP1_PADS_BANK0_BASE 0x0f0000
 
-   h = gpiochip_open(sbc, GPIOCHIP);
+// the following info is from the RP1 datasheet (draft & incomplete as of 2024-02-18)
+// https://datasheets.raspberrypi.com/rp1/rp1-peripherals.pdf
+#define RP1_ATOM_XOR_OFFSET 0x1000
+#define RP1_ATOM_SET_OFFSET 0x2000
+#define RP1_ATOM_CLR_OFFSET 0x3000
 
-   if (h >= 0)
-   {
-      if (lgGpioClaimOutput(h, LFLAGS, GPIOPIN, 0) == LG_OKAY)
-      {
-        //Send a 0b10
-        start = lguTime();
-        lgTxPulse(h, GPIOPIN, T1H, T1L, 0, 1);
-        lgTxPulse(h, GPIOPIN, T0H, T0L, 0, 1);
-        end = lguTime();
-        printf("Took %.1f seconds to send a 1 then 0\n", LOOPS, end-start);
+#define PADS_BANK0_VOLTAGE_SELECT_OFFSET 0
+#define PADS_BANK0_GPIO_OFFSET 0x4
 
-        /*Send a green pulse
-         LEDs are in GRB format 
-         So: 0b111111110000000000000000
-        */
+#define RIO_OUT_OFFSET 0x00
+#define RIO_OE_OFFSET 0x04
+#define RIO_NOSYNC_IN_OFFSET 0x08
+#define RIO_SYNC_IN_OFFSET 0x0C
+//                           3         2         1
+//                          10987654321098765432109876543210
+#define CTRL_MASK_FUNCSEL 0b00000000000000000000000000011111
+#define PADS_MASK_OUTPUT  0b00000000000000000000000011000000
 
-       for (int i = 0; i < LOOPS; i++)
-       {
-        start = lguTime();
-        lguSleep(TRESET * .0000001); //Reset Command
-        lgTxPulse(h, GPIOPIN, T1H, T1L, 0, 8); //Send 8 ones
-        lgTxPulse(h, GPIOPIN, T0H, T0L, 0, 16); //Send 16 zeros
-        end = lguTime();
-        printf("Took %.1f seconds to send a Reset cmd followed by a green pulse to LED1 then 0\n", LOOPS, end-start);
-      }
+#define CTRL_FUNCSEL_RIO 0x05
 
-      }
-      gpiochip_close(sbc, h);
-   }
 
-   rgpiod_stop(sbc);
+void *mapgpio(off_t dev_base, off_t dev_size)
+{
+    int fd;
+    void *mapped;
+    
+    printf("sizeof(off_t) %d\n", sizeof(off_t));
+
+    if ((fd = open("/dev/mem", O_RDWR | O_SYNC)) == -1)
+    {
+        printf("Can't open /dev/mem\n");
+        return (void *)0;
+    }
+
+    mapped = mmap(0, dev_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, dev_base);
+    // close(fd);
+
+    printf("base address: %llx, size: %x, mapped: %p\n", dev_base, dev_size, mapped);
+
+    if (mapped == (void *)-1)
+    {
+        printf("Can't map the memory to user space.\n");
+        return (void *)0;
+    }
+
+    return mapped;
+}
+
+
+typedef struct
+{
+    uint8_t number;
+    volatile uint32_t *status;
+    volatile uint32_t *ctrl;
+    volatile uint32_t *pad;
+} gpio_pin_t;
+
+typedef struct
+{
+    volatile void *rp1_peripherial_base;
+    volatile void *gpio_base;
+    volatile void *pads_base;
+    volatile uint32_t *rio_out;
+    volatile uint32_t *rio_output_enable;
+    volatile uint32_t *rio_nosync_in;
+
+    gpio_pin_t *pins[27];
+
+} rp1_t;
+
+bool create_rp1(rp1_t **rp1)
+{
+
+    rp1_t *r = (rp1_t *)calloc(1, sizeof(rp1_t));
+    if (r == NULL)
+        return false;
+
+    void *base = mapgpio(RP1_BAR1, RP1_BAR1_LEN);
+    if (base == NULL)
+        return false;
+
+    r->rp1_peripherial_base = base;
+    r->gpio_base = base + RP1_IO_BANK0_BASE;
+    r->pads_base = base + RP1_PADS_BANK0_BASE;
+    r->rio_out = (volatile uint32_t *)(base + RP1_RIO0_BASE + RIO_OUT_OFFSET);
+    r->rio_output_enable = (volatile uint32_t *)(base + RP1_RIO0_BASE + RIO_OE_OFFSET);
+    r->rio_nosync_in = (volatile uint32_t *)(base + RP1_RIO0_BASE + RIO_NOSYNC_IN_OFFSET);
+
+    *rp1 = r;
+
+    return true;
+}
+
+bool create_pin(uint8_t pinnumber, rp1_t *rp1)
+{
+    gpio_pin_t *newpin = calloc(1, sizeof(gpio_pin_t));
+    if(newpin == NULL) return false;
+
+    newpin->number = pinnumber;
+
+    // each gpio has a status and control register
+    // adjacent to each other. control = status + 4 (uint8_t)
+    newpin->status = (uint32_t *)(rp1->gpio_base + 8 * pinnumber);
+    newpin->ctrl = (uint32_t *)(rp1->gpio_base + 8 * pinnumber + 4);
+    newpin->pad = (uint32_t *)(rp1->pads_base + PADS_BANK0_GPIO_OFFSET + pinnumber * 4);
+
+    // set the function
+    *(newpin->ctrl + RP1_ATOM_CLR_OFFSET / 4) = CTRL_MASK_FUNCSEL; // first clear the bits
+    *(newpin->ctrl + RP1_ATOM_SET_OFFSET / 4) = CTRL_FUNCSEL_RIO;  // now set the value we need
+
+    rp1->pins[pinnumber] = newpin;
+    printf("pin %d stored in pins array %p\n", pinnumber, rp1->pins[pinnumber]);
+
+    return true;
+}
+
+int pin_enable_output(uint8_t pinnumber, rp1_t *rp1)
+{
+
+    printf("Attempting to enable output\n");
+    //printf("rp1 @ %p\n", rp1);
+    //printf("pin @ %p\n", rp1->pins[pinnumber]);
+
+    //gpio_pin_t *pin = NULL;
+    //printf("pin: %p\n", pin);
+
+    //pin = rp1->pins[pinnumber];
+
+    //printf("pin: %p\n", pin);
+    //printf("pin pads %p\n", pin->pad);
+    //printf("oe: %p\n", rp1->rio_output_enable);
+
+    // first enable the pad to output
+    // pads needs to have OD[7] -> 0 (don't disable output)
+    // and                IE[6] -> 0 (don't enable input)
+    // we use atomic access to the bit clearing alias with a mask
+    // divide the offset by 4 since we're doing uint32* math
+
+    volatile uint32_t *writeadd = rp1->pins[pinnumber]->pad + RP1_ATOM_CLR_OFFSET / 4;
+
+    printf("attempting write for %p at %p\n", rp1->pins[pinnumber]->pad, writeadd);
+
+    *writeadd = PADS_MASK_OUTPUT;
+
+    // now set the RIO output enable using the atomic set alias
+    *(rp1->rio_output_enable + RP1_ATOM_SET_OFFSET / 4) = 1 << rp1->pins[pinnumber]->number;
+
+    return 0;
+}
+
+void pin_on(rp1_t *rp1, uint8_t pin)
+{
+    *(rp1->rio_out + RP1_ATOM_SET_OFFSET / 4) = 1 << pin;
+}
+void pin_off(rp1_t *rp1, uint8_t pin)
+{
+    *(rp1->rio_out + RP1_ATOM_CLR_OFFSET / 4) = 1 << pin;
+}
+
+
+const uint8_t pin = 17;
+
+int main(void)
+{
+
+    struct timespec start, end;
+    long elapsedTime;
+    int i, j;
+
+    // create a rp1 device
+    printf("creating rp1\n");
+    rp1_t *rp1;
+    if (!create_rp1(&rp1))
+    {
+        printf("unable to create rp1\n");
+        return 2;
+    }
+
+    // let's see if we can dump the iobank registers
+    uint32_t *p;
+
+    for (i = 0; i < 27; i++)
+    {
+
+        p = (uint32_t *)(rp1->gpio_base + i * 8);
+
+        printf(
+            "gpio %0d: status @ p = %lx, ctrl @ p = %lx\n",
+            i,
+            *p, *(p + 1));
+    }
+
+    printf("creating pin\n");
+
+    if(!create_pin(pin, rp1)) {
+        printf("unable to create pin %d\n", pin);
+        return 3;
+    }
+    pin_enable_output(pin, rp1);
+    
+   //Send 24 bit signal to turn on one pin green
+    for (int i = 0; i < 1; i++)
+    {
+        //Send 8 ones
+        for(j=0;j<8;j++) {
+            clock_gettime(CLOCK_MONOTONIC, &start);
+            pin_on(rp1, pin);
+            delay_us(0.8);
+            pin_off(rp1, pin);
+            delay_us(.45);
+            clock_gettime(CLOCK_MONOTONIC, &end);
+            elapsedTime = (end.tv_sec - start.tv_sec) * 1000000000L + (end.tv_nsec - start.tv_nsec);
+            printf("Elapsed time: %ld ns\n", elapsedTime);
+        }
+        //Send 16 zeros
+        for(j=0;j<16;j++) {
+            pin_on(rp1, pin);
+            delay_us(0.4);
+            pin_off(rp1, pin);
+            delay_us(0.85);
+        }      
+        //delay_us(50);
+    }
+
+    printf("done\n\n");
+
+    return 0;
 }

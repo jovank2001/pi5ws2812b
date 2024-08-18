@@ -11,8 +11,6 @@ gcc -Wall -o main main.c -llgpio
 #include <stdio.h>
 #include <stdlib.h>
 
-#include <../include/lg/lgpio.h>
-
 #define GPIOPIN 21
 #define LOOPS 120
 #define LFLAGS 0
@@ -27,7 +25,4 @@ From WS2812B.pdf
 #define T1H .8 
 #define T1L .4 
 #define TRESET 50
-
-
-int main(int argc, char *argv[]);
 
