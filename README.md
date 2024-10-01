@@ -3,13 +3,13 @@ This Repository contains a Driver for the new Raspberry Pi 5 RP1 Peripheral chip
 
 
 ### To Run Example which turns on 1st LED Green:
-    1. Ensure hardware connections are made as shown in Image 1
+    1. Ensure hardware connections are made as shown in Connections
     2. $ gcc rp1Spi.c rp1SpiUtil.c pi5ws2812b.c -o run
     3. $ sudo ./run
 
 Result:
 ![Alt text](example.jpg)
 
-#### Image 1
+### Connections
 ![Alt text](connections.jpg)
 
