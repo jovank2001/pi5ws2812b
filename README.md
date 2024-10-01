@@ -1,5 +1,7 @@
 ## Control WS2812B LED Matrix using your Raspberry Pi 5
-This Repository contains a Driver for the new Raspberry Pi 5 RP1 Peripheral chip that can be used to control your WS2812b LEDs
+This Repository contains a Driver for the new Raspberry Pi 5 RP1 Peripheral chip that can be used to control your WS2812b LEDs.
+
+Huge kudos to [Praktronics](https://github.com/praktronics) for figuring out the spi RP1 register locations
 
 
 ### To Run Example which turns on 1st LED Green:
