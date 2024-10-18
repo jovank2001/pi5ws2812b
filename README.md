@@ -10,7 +10,8 @@ Huge kudos to [Praktronics](https://github.com/praktronics) for figuring out the
     3. pi5ws2812b $ sudo ./run
 
 Result:
-<img src="example.jpg" alt="drawing" width="200"/>
+
+<img src="example.jpg" alt="drawing" width="500" height = "400"/>
 
 ### Connections
 ![Alt text](connections.jpg)
