@@ -6,7 +6,7 @@ Huge kudos to [Praktronics](https://github.com/praktronics) for figuring out the
 
 ### To Run Example which turns on 1st LED Green:
     1. Ensure hardware connections are made as shown in Connections photo below:
-    <img src="connections.jpg" alt="drawing" width="500" height="600"/>
+<img src="connections.jpg" alt="drawing" width="500" height="600"/>
 
     2. pi5ws2812b $ gcc rp1Spi.c rp1SpiUtil.c pi5ws2812b.c -o run
     3. pi5ws2812b $ sudo ./run
